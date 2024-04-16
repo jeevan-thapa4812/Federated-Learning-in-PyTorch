@@ -29,6 +29,7 @@ class FedavgServer(BaseServer):
         self.curr_lr = self.args.lr  # learning rate
         self.clients = self._create_clients(client_datasets)  # clients container
         self.results = defaultdict(dict)  # logging results container
+        self.server_optimizer = self._get_algorithm(self.global_model, **self.opt_kwargs)
 
     def _init_model(self, model):
         logger.info(
@@ -270,7 +271,7 @@ class FedavgServer(BaseServer):
                 f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...completed updates of {"all" if ids is None else len(ids)} clients!')
             return update_sizes
 
-    def _aggregate(self, server_optimizer, ids, updated_sizes):
+    def _aggregate(self, ids, updated_sizes):
         assert set(updated_sizes.keys()) == set(ids)
         logger.info(
             f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Aggregate updated signals!')
@@ -282,11 +283,10 @@ class FedavgServer(BaseServer):
         # accumulate weights
         for identifier in ids:
             local_layers_iterator = self.clients[identifier].upload()
-            server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
+            self.server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
             self.clients[identifier].model = None
         logger.info(
             f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...successfully aggregated into a new gloal model!')
-        return server_optimizer
 
     @torch.no_grad()
     def _central_evaluate(self):
@@ -342,10 +342,9 @@ class FedavgServer(BaseServer):
         #################
         # Server Update #
         #################
-        server_optimizer = self._get_algorithm(self.global_model, **self.opt_kwargs)
-        server_optimizer.zero_grad(set_to_none=True)
-        server_optimizer = self._aggregate(server_optimizer, selected_ids, updated_sizes)  # aggregate local updates
-        server_optimizer.step()  # update global model with by the aggregated update
+        self.server_optimizer.zero_grad(set_to_none=True)
+        self._aggregate(selected_ids, updated_sizes)  # aggregate local updates
+        self.server_optimizer.step()  # update global model with by the aggregated update
         if self.round % self.args.lr_decay_step == 0:  # update learning rate
             self.curr_lr *= self.args.lr_decay
         return selected_ids
