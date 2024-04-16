@@ -3,13 +3,14 @@ import torch
 from .basealgorithm import BaseOptimizer
 
 
-class FedDAdaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
+class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
     def __init__(self, params, **kwargs):
-        lr = kwargs.get('lr')
-        v0 = kwargs.get('v0')
-        tau = kwargs.get('tau')
-        momentum = kwargs.get('betas')
-        defaults = dict(lr=lr, momentum=momentum, v0=v0, tau=tau)
+        # lr = kwargs.get('lr')
+        # v0 = kwargs.get('v0')
+        # tau = kwargs.get('tau')
+        # momentum = kwargs.get('betas')
+        # defaults = dict(lr=lr, momentum=momentum, v0=v0, tau=tau)
+        defaults = None
         BaseOptimizer.__init__(self);
         torch.optim.Optimizer.__init__(self, params=params, defaults=defaults)
 

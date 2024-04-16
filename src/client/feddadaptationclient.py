@@ -2,6 +2,6 @@ from .fedavgclient import FedavgClient
 
 
 
-class FedDAdaptationClient(FedavgClient):
+class FeddadaptationClient(FedavgClient):
     def __init__(self, **kwargs):
-        super(FedDAdaptationClient, self).__init__(**kwargs)
+        super(FeddadaptationClient, self).__init__(**kwargs)
