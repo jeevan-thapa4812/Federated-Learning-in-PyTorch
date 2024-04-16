@@ -1,10 +1,8 @@
-import torch
+import importlib
 import inspect
 import logging
-import importlib
 
 logger = logging.getLogger(__name__)
-
 
 
 def load_model(args):
@@ -17,7 +15,7 @@ def load_model(args):
     # collect eneterd model arguments
     model_args = {}
     for argument in required_args:
-        if argument == 'self': 
+        if argument == 'self':
             continue
         model_args[argument] = getattr(args, argument)
 

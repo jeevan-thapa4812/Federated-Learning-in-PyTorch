@@ -1,7 +1,4 @@
-import torch
-
 from .fedavg import FedavgOptimizer
-
 
 
 class FedavgmOptimizer(FedavgOptimizer):

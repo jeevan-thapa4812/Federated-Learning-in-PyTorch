@@ -3,7 +3,7 @@ import torch
 from .basealgorithm import BaseOptimizer
 
 
-class FedadamOptimizer(BaseOptimizer, torch.optim.Optimizer):
+class FedDAdaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
     def __init__(self, params, **kwargs):
         lr = kwargs.get('lr')
         v0 = kwargs.get('v0')
@@ -19,35 +19,39 @@ class FedadamOptimizer(BaseOptimizer, torch.optim.Optimizer):
             loss = closure()
 
         for idx, group in enumerate(self.param_groups):
-            (beta1, beta2) = group['momentum']
-            tau = group['tau']
-            lr = group['lr']
-            v0 = group['v0']
+            gamma_k = 1
+            beta = 0.9
+
             for param in group['params']:
                 if param.grad is None:
                     continue
                 # get (\Delta_t)
-                delta = -param.grad.data
+                gk = param.grad.data
 
                 if idx == 0:  # idx == 0: parameters; optimize according to algorithm
+                    if 'dk' not in self.state[param]:
+                        self.state[param]['dk'] = 10e-6
+                        self.state[param]['sk'] = 0
+                        self.state[param]['zk'] = param.data
+                        self.state[param]['G'] = torch.norm(gk, p=2)
+                        self.state[param]['lam_g_dot_s_sum'] = 0
+
+                    lambda_k = self.state[param]['dk'] * gamma_k / self.state[param]['G']
+
+                    self.state[param]['lam_g_dot_s_sum'] = self.state[param]['lam_g_dot_s_sum'] + lambda_k * torch.dot(
+                        gk, self.state[param]['sk'])  # lam_g_dot_s_sum += lambda_k * gk.T @ sk
+
                     # calculate m_t
-                    if 'momentum_buffer1' not in self.state[param]:
-                        self.state[param]['momentum_buffer1'] = torch.zeros_like(param).detach()
-                    self.state[param]['momentum_buffer1'].mul_(beta1).add_(
-                        delta.mul(1. - beta1))  # \beta1 * m_t + (1 - \beta1) * \Delta_t
-                    m_new = self.state[param]['momentum_buffer1']
+                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk  # sk+1 = sk + lambda_k * gk
+                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk  # zk+1 = zk - lambda_k * gk
 
-                    # calculate v_t
-                    if 'momentum_buffer2' not in self.state[param]:
-                        self.state[param]['momentum_buffer2'] = v0 * beta2 + delta.pow(2).mul(1. - beta2)
-                    self.state[param]['momentum_buffer2'].mul_(beta2).add_(
-                        delta.pow(2).mul(1. - beta2))  # \beta2 * v_t + (1 - \beta2) * \Delta_t^2
-                    v_new = self.state[param]['momentum_buffer2']
+                    param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
 
-                    # update parameters
-                    param.data.add_(m_new.div(v_new.pow(0.5).add(tau)).mul(lr))
+                    dkp1_ = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / torch.norm(
+                        self.state[param]['sk'], p=2)
+                    self.state[param]['dk'] = torch.max(self.state[param]['dk'], dkp1_)
                 elif idx == 1:  # idx == 1: buffers; just averaging
-                    param.data.add_(delta)
+                    param.data.sub_(gk)
         return loss
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,

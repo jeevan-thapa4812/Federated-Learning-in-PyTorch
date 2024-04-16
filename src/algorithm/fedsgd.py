@@ -3,7 +3,6 @@ import torch
 from .fedavg import FedavgOptimizer
 
 
-
 class FedsgdOptimizer(FedavgOptimizer):
     def __init__(self, params, **kwargs):
         super(FedsgdOptimizer, self).__init__(params=params, **kwargs)
@@ -23,7 +22,8 @@ class FedsgdOptimizer(FedavgOptimizer):
                 if beta > 0.:
                     if 'momentum_buffer' not in self.state[param]:
                         self.state[param]['momentum_buffer'] = torch.zeros_like(param).detach()
-                    self.state[param]['momentum_buffer'].mul_(beta).add_(delta.mul(1. - beta)) # \beta * v + (1 - \beta) * (lr * grad)
+                    self.state[param]['momentum_buffer'].mul_(beta).add_(
+                        delta.mul(1. - beta))  # \beta * v + (1 - \beta) * (lr * grad)
                     delta = self.state[param]['momentum_buffer']
                 param.data.sub_(delta)
         return loss

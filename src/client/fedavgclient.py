@@ -1,10 +1,11 @@
 import copy
-import torch
 import inspect
 import itertools
 
-from .baseclient import BaseClient
+import torch
+
 from src import MetricManager
+from .baseclient import BaseClient
 
 
 class FedavgClient(BaseClient):
@@ -13,7 +14,7 @@ class FedavgClient(BaseClient):
         self.args = args
         self.training_set = training_set
         self.test_set = test_set
-        
+
         self.optim = torch.optim.__dict__[self.args.optimizer]
         self.criterion = torch.nn.__dict__[self.args.criterion]
 
@@ -26,12 +27,12 @@ class FedavgClient(BaseClient):
         # collect eneterd arguments
         refined_args = {}
         for argument in required_args:
-            if hasattr(args, argument): 
+            if hasattr(args, argument):
                 refined_args[argument] = getattr(args, argument)
         return refined_args
 
     def _create_dataloader(self, dataset, shuffle):
-        if self.args.B == 0 :
+        if self.args.B == 0:
             self.args.B = len(self.training_set)
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.args.B, shuffle=shuffle)
 
@@ -39,7 +40,7 @@ class FedavgClient(BaseClient):
         mm = MetricManager(self.args.eval_metrics)
         self.model.train()
         self.model.to(self.args.device)
-        
+
         optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
         for e in range(self.args.E):
             for inputs, targets in self.train_loader:
@@ -64,7 +65,7 @@ class FedavgClient(BaseClient):
 
     @torch.inference_mode()
     def evaluate(self):
-        if self.args.train_only: # `args.test_size` == 0
+        if self.args.train_only:  # `args.test_size` == 0
             return {'loss': -1, 'metrics': {'none': -1}}
 
         mm = MetricManager(self.args.eval_metrics)
@@ -88,7 +89,7 @@ class FedavgClient(BaseClient):
 
     def upload(self):
         return itertools.chain.from_iterable([self.model.named_parameters(), self.model.named_buffers()])
-    
+
     def __len__(self):
         return len(self.training_set)
 
