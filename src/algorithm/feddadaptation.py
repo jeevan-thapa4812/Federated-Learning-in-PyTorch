@@ -10,7 +10,7 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
         # tau = kwargs.get('tau')
         # momentum = kwargs.get('betas')
         # defaults = dict(lr=lr, momentum=momentum, v0=v0, tau=tau)
-        defaults = None
+        defaults = {}
         BaseOptimizer.__init__(self);
         torch.optim.Optimizer.__init__(self, params=params, defaults=defaults)
 
@@ -31,16 +31,15 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
 
                 if idx == 0:  # idx == 0: parameters; optimize according to algorithm
                     if 'dk' not in self.state[param]:
-                        self.state[param]['dk'] = 10e-6
-                        self.state[param]['sk'] = 0
+                        self.state[param]['dk'] = torch.tensor([10e-6])
+                        self.state[param]['sk'] = torch.zeros_like(gk)
                         self.state[param]['zk'] = param.data
                         self.state[param]['G'] = torch.norm(gk, p=2)
                         self.state[param]['lam_g_dot_s_sum'] = 0
 
                     lambda_k = self.state[param]['dk'] * gamma_k / self.state[param]['G']
-
-                    self.state[param]['lam_g_dot_s_sum'] = self.state[param]['lam_g_dot_s_sum'] + lambda_k * torch.dot(
-                        gk, self.state[param]['sk'])  # lam_g_dot_s_sum += lambda_k * gk.T @ sk
+                    # lam_g_dot_s_sum += lambda_k * gk.T @ sk
+                    self.state[param]['lam_g_dot_s_sum'] = self.state[param]['lam_g_dot_s_sum'] + lambda_k * torch.dot(gk.view(-1), self.state[param]['sk'].view(-1))
 
                     # calculate m_t
                     self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk  # sk+1 = sk + lambda_k * gk
@@ -48,8 +47,7 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
 
                     param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
 
-                    dkp1_ = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / torch.norm(
-                        self.state[param]['sk'], p=2)
+                    dkp1_ = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / (torch.norm(self.state[param]['sk'], p=2) + 10e-6)
                     self.state[param]['dk'] = torch.max(self.state[param]['dk'], dkp1_)
                 elif idx == 1:  # idx == 1: buffers; just averaging
                     param.data.sub_(gk)
