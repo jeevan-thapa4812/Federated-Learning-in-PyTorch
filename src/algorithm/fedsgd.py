@@ -18,14 +18,14 @@ class FedsgdOptimizer(FedavgOptimizer):
             for param in group['params']:
                 if param.grad is None:
                     continue
-                delta = param.grad.mul(group['lr'])
+                delta = param.grad.data
                 if beta > 0.:
                     if 'momentum_buffer' not in self.state[param]:
                         self.state[param]['momentum_buffer'] = torch.zeros_like(param).detach()
                     self.state[param]['momentum_buffer'].mul_(beta).add_(
                         delta.mul(1. - beta))  # \beta * v + (1 - \beta) * (lr * grad)
                     delta = self.state[param]['momentum_buffer']
-                param.data.sub_(delta)
+                param.data.sub_(delta.mul(group['lr']))
         return loss
 
     def accumulate(self, mixing_coefficient, local_layers_iterator):
