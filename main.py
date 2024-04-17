@@ -160,7 +160,7 @@ if __name__ == "__main__":
     ######################
     ## federated learning settings
     parser.add_argument('--algorithm', help='federated learning algorithm to be used', type=str,
-                        choices=['fedavg', 'fedsgd', 'fedprox', 'fedavgm', 'feddadaptation'],
+                        choices=['fedavg', 'fedsgd', 'fedprox', 'fedavgm', 'fedadam', 'feddadaptation'],
                         required=True
                         )
     parser.add_argument('--eval_type', help='''the evaluation type of a model trained from FL algorithm
@@ -190,6 +190,8 @@ if __name__ == "__main__":
     parser.add_argument('--beta1', help='server momentum factor', type=float, choices=[Range(0., 1.)], default=0.)
     parser.add_argument('--beta2', help='idk momentum factor', type=float, choices=[Range(0., 1.)], default=0.1)
 
+    parser.add_argument('--tau', help='small value to add in denominator', type=float, choices=[Range(0., 1.)], default=1e-6)
+
     # optimization arguments
     parser.add_argument('--no_shuffle', help='do not shuffle data when training (if passed)', action='store_true')
     parser.add_argument('--optimizer',
@@ -202,6 +204,8 @@ if __name__ == "__main__":
     parser.add_argument('--momentum', help='momentum factor', type=float, choices=[Range(0., 1.)], default=0.)
     parser.add_argument('--lr', help='learning rate for local updates in each client', type=float,
                         choices=[Range(0., 100.)], default=0.01, required=True)
+    parser.add_argument('--server_lr', help='learning rate for local updates in each client', type=float,
+                        choices=[Range(0., 100.)], default=0.01, required=False)
     parser.add_argument('--lr_decay', help='decay rate of learning rate', type=float, choices=[Range(0., 1.)],
                         default=1.0)
     parser.add_argument('--lr_decay_step', help='intervals of learning rate decay', type=int, default=20)
