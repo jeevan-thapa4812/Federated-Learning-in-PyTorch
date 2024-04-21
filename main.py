@@ -37,6 +37,7 @@ def main(args, writer):
 
     # federated learning\textsl{\textsl{}}
     for curr_round in range(1, args.R + 1):
+        print("\n\n Communication round: ", curr_round, "\n\n")
         ## update round indicator
         server.round = curr_round
 
@@ -160,7 +161,7 @@ if __name__ == "__main__":
     ######################
     ## federated learning settings
     parser.add_argument('--algorithm', help='federated learning algorithm to be used', type=str,
-                        choices=['fedavg', 'fedsgd', 'fedprox', 'fedavgm', 'fedadam', 'feddadaptation'],
+                        choices=['fedavg', 'fedsgd', 'fedprox', 'fedavgm', 'fedadam', 'feddadaptation', 'feddadaptationsplit'],
                         required=True
                         )
     parser.add_argument('--eval_type', help='''the evaluation type of a model trained from FL algorithm
@@ -235,9 +236,9 @@ if __name__ == "__main__":
     # check TensorBoard execution
     tb = TensorBoardRunner(args.log_path, args.tb_host, args.tb_port) if args.use_tb else None
 
-    # define writer
-    writer = SummaryWriter(log_dir=os.path.join(args.log_path, f'{args.exp_name}_{curr_time}'),
-                           filename_suffix=f'_{curr_time}')
+    logdir = os.path.join(args.log_path, args.dataset, f'{args.exp_name}_{curr_time}')
+    os.makedirs(logdir, exist_ok=True)
+    writer = SummaryWriter(log_dir=logdir, filename_suffix=f'_{curr_time}')
 
     # run main program
     torch.autograd.set_detect_anomaly(True)

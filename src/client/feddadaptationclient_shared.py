@@ -81,7 +81,7 @@ class FeddadaptationClientShared(FedavgClient):
 
     def upload(self):
         # extract optimizer state and upload
-        group = self.param_groups[0]
+        group = self.optimizer.param_groups[0]
 
         named_optimizer_state = {name: self.optimizer.state[param] for name, param in
                                  self.model.named_parameters() }
