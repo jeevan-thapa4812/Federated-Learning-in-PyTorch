@@ -5,7 +5,21 @@ import itertools
 import torch
 
 from src import MetricManager
+from src.algorithm.dadaptation import DAdaptation
+from src.algorithm.dadaptationsplit import DAdaptationSplit
+from src.algorithm.dadapt_sgd import DAdaptSGD
 from .baseclient import BaseClient
+
+
+def get_optimizer_class(name):
+    if name == "DAdaptation":
+        return DAdaptation
+    if name == "DAdaptationSplit":
+        return DAdaptationSplit
+    if name == "DAdaptSGD":
+        return DAdaptSGD
+    else:
+        return torch.optim.__dict__[name]
 
 
 class FedavgClient(BaseClient):
@@ -15,7 +29,14 @@ class FedavgClient(BaseClient):
         self.training_set = training_set
         self.test_set = test_set
 
-        self.optim = torch.optim.__dict__[self.args.optimizer]
+        self.optim = get_optimizer_class(self.args.optimizer)
+
+        # import pdb
+        # pdb.set_trace()
+        self.use_single_optimizer_across_communication_rounds = True
+        # if self.use_single_optimizer_across_communication_rounds:
+        #     self.optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
+
         self.criterion = torch.nn.__dict__[self.args.criterion]
 
         self.train_loader = self._create_dataloader(self.training_set, shuffle=not self.args.no_shuffle)
@@ -41,7 +62,12 @@ class FedavgClient(BaseClient):
         self.model.train()
         self.model.to(self.args.device)
 
+        # if self.use_single_optimizer_across_communication_rounds:
+        #     optimizer = self.optimizer
+        # else:
+        #     optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
         optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
+
         for e in range(self.args.E):
             for inputs, targets in self.train_loader:
                 inputs, targets = inputs.to(self.args.device), targets.to(self.args.device)
@@ -85,6 +111,8 @@ class FedavgClient(BaseClient):
         return mm.results
 
     def download(self, model):
+        # if self.use_single_optimizer_across_communication_rounds and (self.model is not None):
+        #     pass
         self.model = copy.deepcopy(model)
 
     def upload(self):

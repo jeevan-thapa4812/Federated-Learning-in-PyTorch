@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from src import init_weights, MetricManager, TqdmToLogger
+from src.client.feddadaptationclient_shared import FeddadaptationClientShared
 from .baseserver import BaseServer
 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,16 @@ class FedavgServer(BaseServer):
 
     def _init_model(self, model):
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Initialize a model!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Initialize a model!')
         init_weights(model, self.args.init_type, self.args.init_gain)
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...sucessfully initialized the model ({self.args.model_name}; (Initialization type: {self.args.init_type.upper()}))!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...sucessfully initialized the model ({self.args.model_name}; (Initialization type: {self.args.init_type.upper()}))!')
         return model
 
     def _get_algorithm(self, model, **kwargs):
         ALGORITHM_CLASS = import_module(f'..algorithm.{self.args.algorithm}', package=__package__).__dict__[
             f'{self.args.algorithm.title()}Optimizer']
+        print(ALGORITHM_CLASS)
         optimizer = ALGORITHM_CLASS(params=model.parameters(), **kwargs)
         if self.args.algorithm != 'fedsgd':
             optimizer.add_param_group(dict(params=list(
@@ -49,8 +51,12 @@ class FedavgServer(BaseServer):
         return optimizer
 
     def _create_clients(self, client_datasets):
+
         CLIENT_CLASS = import_module(f'..client.{self.args.algorithm}client', package=__package__).__dict__[
             f'{self.args.algorithm.title()}Client']
+        if self.args.optimizer in ['DAdaptation', 'DAdaptationSplit', 'DAdaptSGD']:
+            CLIENT_CLASS = FeddadaptationClientShared
+            self.client_optimizer_state = None
 
         def __create_client(identifier, datasets):
             client = CLIENT_CLASS(args=self.args, training_set=datasets[0], test_set=datasets[-1])
@@ -58,23 +64,23 @@ class FedavgServer(BaseServer):
             return client
 
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Create clients!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Create clients!')
         clients = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(int(self.args.K), os.cpu_count() - 1)) as workhorse:
             for identifier, datasets in TqdmToLogger(
                     enumerate(client_datasets),
                     logger=logger,
-                    desc=f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...creating clients... ',
+                    desc=f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...creating clients... ',
                     total=len(client_datasets)
             ):
                 clients.append(workhorse.submit(__create_client, identifier, datasets).result())
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...sucessfully created {self.args.K} clients!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...sucessfully created {self.args.K} clients!')
         return clients
 
     def _sample_clients(self, exclude=[]):
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Sample clients!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Sample clients!')
         if exclude == []:  # Update - randomly select max(floor(C * K), 1) clients
             num_sampled_clients = max(int(self.args.C * self.args.K), 1)
             sampled_client_ids = sorted(random.sample([i for i in range(self.args.K)], num_sampled_clients))
@@ -89,13 +95,13 @@ class FedavgServer(BaseServer):
                     [identifier for identifier in [i for i in range(self.args.K)] if identifier not in exclude],
                     num_sampled_clients))
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...{num_sampled_clients} clients are selected!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...{num_sampled_clients} clients are selected!')
         return sampled_client_ids
 
     def _log_results(self, resulting_sizes, results, eval, participated, save_raw):
         losses, metrics, num_samples = list(), defaultdict(list), list()
         for identifier, result in results.items():
-            client_log_string = f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [{"EVALUATE" if eval else "UPDATE"}] [CLIENT] < {str(identifier).zfill(6)} > '
+            client_log_string = f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [{"EVALUATE" if eval else "UPDATE"}] [CLIENT] < {str(identifier).zfill(6)} > '
             if eval:  # get loss and metrics
                 # loss
                 loss = result['loss']
@@ -126,30 +132,32 @@ class FedavgServer(BaseServer):
 
         # aggregate into total logs
         result_dict = defaultdict(dict)
-        total_log_string = f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [{"EVALUATE" if eval else "UPDATE"}] [SUMMARY] ({len(resulting_sizes)} clients):'
+        total_log_string = f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [{"EVALUATE" if eval else "UPDATE"}] [SUMMARY] ({len(resulting_sizes)} clients):'
 
         # loss
         losses_array = np.array(losses).astype(float)
         weighted = losses_array.dot(num_samples) / sum(num_samples);
         std = losses_array.std()
 
-        top10_indices = np.argpartition(losses_array, -int(0.1 * len(losses_array)))[
-                        -int(0.1 * len(losses_array)):] if len(losses_array) > 1 else 0
-        top10 = np.atleast_1d(losses_array[top10_indices])
-        top10_mean, top10_std = top10.dot(np.atleast_1d(num_samples[top10_indices])) / num_samples[
-            top10_indices].sum(), top10.std()
+        # top10_indices = np.argpartition(losses_array, -int(0.1 * len(losses_array)))[
+        #                 -int(0.1 * len(losses_array)):] if len(losses_array) > 1 else 0
+        # top10 = np.atleast_1d(losses_array[top10_indices])
+        # top10_mean, top10_std = top10.dot(np.atleast_1d(num_samples[top10_indices])) / num_samples[
+        #     top10_indices].sum(), top10.std()
+        #
+        # bot10_indices = np.argpartition(losses_array, max(1, int(0.1 * len(losses_array)) - 1))[
+        #                 :max(1, int(0.1 * len(losses_array)))] if len(losses_array) > 1 else 0
+        # bot10 = np.atleast_1d(losses_array[bot10_indices])
+        # bot10_mean, bot10_std = bot10.dot(np.atleast_1d(num_samples[bot10_indices])) / num_samples[
+        #     bot10_indices].sum(), bot10.std()
 
-        bot10_indices = np.argpartition(losses_array, max(1, int(0.1 * len(losses_array)) - 1))[
-                        :max(1, int(0.1 * len(losses_array)))] if len(losses_array) > 1 else 0
-        bot10 = np.atleast_1d(losses_array[bot10_indices])
-        bot10_mean, bot10_std = bot10.dot(np.atleast_1d(num_samples[bot10_indices])) / num_samples[
-            bot10_indices].sum(), bot10.std()
+        total_log_string += f'\n    - Loss: Avg. ({weighted:.4f}) Std. ({std:.4f})'
 
-        total_log_string += f'\n    - Loss: Avg. ({weighted:.4f}) Std. ({std:.4f}) | Top 10% ({top10_mean:.4f}) Std. ({top10_std:.4f}) | Bottom 10% ({bot10_mean:.4f}) Std. ({bot10_std:.4f})'
+        # total_log_string += f'\n    - Loss: Avg. ({weighted:.4f}) Std. ({std:.4f}) | Top 10% ({top10_mean:.4f}) Std. ({top10_std:.4f}) | Bottom 10% ({bot10_mean:.4f}) Std. ({bot10_std:.4f})'
         result_dict['loss'] = {
             'avg': weighted.astype(float), 'std': std.astype(float),
-            'top10p_avg': top10_mean.astype(float), 'top10p_std': top10_std.astype(float),
-            'bottom10p_avg': bot10_mean.astype(float), 'bottom10p_std': bot10_std.astype(float)
+            # 'top10p_avg': top10_mean.astype(float), 'top10p_std': top10_std.astype(float),
+            # 'bottom10p_avg': bot10_mean.astype(float), 'bottom10p_std': bot10_std.astype(float)
         }
 
         if save_raw:
@@ -157,8 +165,13 @@ class FedavgServer(BaseServer):
 
         self.writer.add_scalars(
             f'Local {"Test" if eval else "Training"} Loss ' + eval * f'({"In" if participated else "Out"})',
-            {'Avg.': weighted, 'Std.': std, 'Top 10% Avg.': top10_mean, 'Top 10% Std.': top10_std,
-             'Bottom 10% Avg.': bot10_mean, 'Bottom 10% Std.': bot10_std},
+            {'Avg.': weighted,
+             'Std.': std,
+             # 'Top 10% Avg.': top10_mean,
+             # 'Top 10% Std.': top10_std,
+             # 'Bottom 10% Avg.': bot10_mean,
+             # 'Bottom 10% Std.': bot10_std
+             },
             self.round
         )
 
@@ -204,8 +217,11 @@ class FedavgServer(BaseServer):
 
     def _request(self, ids, eval, participated, retain_model, save_raw):
         def __update_clients(client):
-            if client.model is None:
-                client.download(self.global_model)
+            if isinstance(client, FeddadaptationClientShared):
+                client.download(self.global_model, self.client_optimizer_state)
+            else:
+                if client.model is None:
+                    client.download(self.global_model)
             client.args.lr = self.curr_lr
             update_result = client.update()
             return {client.id: len(client.training_set)}, {client.id: update_result}
@@ -219,7 +235,7 @@ class FedavgServer(BaseServer):
             return {client.id: len(client.test_set)}, {client.id: eval_result}
 
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Request {"updates" if not eval else "evaluation"} to {"all" if ids is None else len(ids)} clients!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Request {"updates" if not eval else "evaluation"} to {"all" if ids is None else len(ids)} clients!')
         if eval:
             if self.args.train_only:
                 return None
@@ -228,7 +244,7 @@ class FedavgServer(BaseServer):
                 for idx in TqdmToLogger(
                         ids,
                         logger=logger,
-                        desc=f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...evaluate clients... ',
+                        desc=f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...evaluate clients... ',
                         total=len(ids)
                 ):
                     jobs.append(workhorse.submit(__evaluate_clients, self.clients[idx]))
@@ -244,7 +260,7 @@ class FedavgServer(BaseServer):
                 save_raw=save_raw
             )
             logger.info(
-                f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...completed evaluation of {"all" if ids is None else len(ids)} clients!')
+                f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...completed evaluation of {"all" if ids is None else len(ids)} clients!')
             return None
         else:
             jobs, results = [], []
@@ -252,7 +268,7 @@ class FedavgServer(BaseServer):
                 for idx in TqdmToLogger(
                         ids,
                         logger=logger,
-                        desc=f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...update clients... ',
+                        desc=f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...update clients... ',
                         total=len(ids)
                 ):
                     jobs.append(workhorse.submit(__update_clients, self.clients[idx]))
@@ -268,13 +284,13 @@ class FedavgServer(BaseServer):
                 save_raw=False
             )
             logger.info(
-                f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...completed updates of {"all" if ids is None else len(ids)} clients!')
+                f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...completed updates of {"all" if ids is None else len(ids)} clients!')
             return update_sizes
 
     def _aggregate(self, ids, updated_sizes):
         assert set(updated_sizes.keys()) == set(ids)
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Aggregate updated signals!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Aggregate updated signals!')
 
         # calculate mixing coefficients according to sample sizes
         coefficients = {identifier: float(numerator / sum(updated_sizes.values())) for identifier, numerator in
@@ -282,11 +298,36 @@ class FedavgServer(BaseServer):
 
         # accumulate weights
         for identifier in ids:
-            local_layers_iterator = self.clients[identifier].upload()
-            self.server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
-            self.clients[identifier].model = None
+            if isinstance(self.clients[identifier].model, FeddadaptationClientShared):
+                local_layers_iterator, client_optimizer_state = self.clients[identifier].upload()
+                self.server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
+
+                self.update_client_state(coefficients[identifier], client_optimizer_state)
+
+                self.clients[identifier].model = None
+
+            else:
+                local_layers_iterator = self.clients[identifier].upload()
+                self.server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
+                self.clients[identifier].model = None
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...successfully aggregated into a new gloal model!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...successfully aggregated into a new gloal model!')
+
+    def update_client_optimizer_state(self, mixing_coefficient, client_optimizer_state):
+        named_optimizer_state = client_optimizer_state["named_optimizer_state"]
+        optimizer_init_params = client_optimizer_state["optimizer_init_params"]
+
+        if self.client_optimizer_state is None:
+            self.client_optimizer_state = {
+                'named_optimizer_state': {name: param * mixing_coefficient for name, param in
+                                          named_optimizer_state.items()},
+                'optimizer_init_params': {k: v * mixing_coefficient for k, v in optimizer_init_params.items()}
+            }
+        else:
+            for name, param in named_optimizer_state.items():
+                self.client_optimizer_state['named_optimizer_state'][name] += param * mixing_coefficient
+            for k, v in optimizer_init_params.items():
+                self.client_optimizer_state['optimizer_init_params'][k] += v * mixing_coefficient
 
     @torch.no_grad()
     def _central_evaluate(self):
@@ -308,7 +349,7 @@ class FedavgServer(BaseServer):
 
         # log result
         result = mm.results
-        server_log_string = f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [EVALUATE] [SERVER] '
+        server_log_string = f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] [EVALUATE] [SERVER] '
 
         ## loss
         loss = result['loss']
@@ -381,7 +422,7 @@ class FedavgServer(BaseServer):
         """Save results.
         """
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Save results and the global model checkpoint!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] Save results and the global model checkpoint!')
         with open(os.path.join(self.args.result_path, f'{self.args.exp_name}.json'), 'w',
                   encoding='utf8') as result_file:  # save results
             results = {key: value for key, value in self.results.items()}
@@ -390,6 +431,6 @@ class FedavgServer(BaseServer):
                    os.path.join(self.args.result_path, f'{self.args.exp_name}.pt'))  # save model checkpoint
         self.writer.close()
         logger.info(
-            f'[{self.args.algorithm.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...finished federated learning!')
+            f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...finished federated learning!')
         if self.args.use_tb:
             input('[FINISH] ...press <Enter> to exit after tidying up your TensorBoard logging!')

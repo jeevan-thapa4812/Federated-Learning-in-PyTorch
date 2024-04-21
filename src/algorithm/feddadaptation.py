@@ -61,10 +61,10 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
                     if decay != 0:
                         gk.add_(param.data, alpha=decay)
 
-                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk  # sk+1 = sk + lambda_k * gk
-                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk  # zk+1 = zk - lambda_k * gk
+                    self.state[param]['sk'].data.add_(gk, alpha=lambda_k)
+                    self.state[param]['zk'].data.sub_(gk, alpha=lambda_k)
 
-                    param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
+                    param.data.mul_(beta).add_(self.state[param]['zk'], alpha=1 - beta)
 
                     sk_sq += (self.state[param]['sk'] ** 2).sum().item()
                     numerator_weighted += lambda_k * torch.dot(gk.view(-1), self.state[param]['sk'].view(-1))
@@ -80,6 +80,7 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,
                    check_if=lambda name: 'num_batches_tracked' in name):
+
         for group in self.param_groups:
             for server_param, (name, local_signals) in zip(group['params'], local_layers_iterator):
                 if check_if(name):

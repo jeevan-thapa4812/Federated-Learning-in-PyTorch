@@ -93,8 +93,7 @@ class DAdaptSGD(torch.optim.Optimizer):
                     if group_lr > 0.0:
                         g_sq += (grad * grad).sum().item()
 
-            global_gsq = g_sq
-            group['g0_norm'] = math.sqrt(global_gsq)
+            group['g0_norm'] = math.sqrt(g_sq)
 
         g0_norm = group['g0_norm']
 
@@ -132,15 +131,14 @@ class DAdaptSGD(torch.optim.Optimizer):
 
 
         if lr > 0.0:
-            global_sk_sq = sk_sq
             global_numerator_weighted = numerator_weighted
 
-            d_hat = 2 * global_numerator_weighted / math.sqrt(global_sk_sq)
+            d_hat = 2 * global_numerator_weighted / math.sqrt(sk_sq)
             d = max(d, min(d_hat, d * growth_rate))
 
         # if we have not done any updates
         # if we have any gradients available, will have sk_sq > 0 (unless \|g\|=0)
-        if global_sk_sq == 0:
+        if sk_sq == 0:
             return loss
 
         for group in self.param_groups:

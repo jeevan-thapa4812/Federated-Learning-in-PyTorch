@@ -29,12 +29,11 @@ class FeddadaptationsplitOptimizer(BaseOptimizer, torch.optim.Optimizer):
                 gk = param.grad.data
 
                 if idx == 0:  # idx == 0: parameters; optimize according to algorithm
-                    opt_not_initialized = 'dk' not in self.state[param]
-                    if opt_not_initialized:
-                        self.state[param]['dk'] = torch.tensor([1e-6])
+                    if 'dk' not in self.state[param]:
+                        self.state[param]['dk'] = torch.tensor([1e-6]).item()
                         self.state[param]['sk'] = torch.zeros_like(gk).detach()
                         self.state[param]['zk'] = param.data.clone().detach()
-                        self.state[param]['G'] = torch.norm(gk, p=2)
+                        self.state[param]['G'] = torch.norm(gk, p=2).item()
                         self.state[param]['lam_g_dot_s_sum'] = 0
                         print('y')
                     lambda_k = self.state[param]['dk'] * gamma_k / self.state[param]['G']
@@ -42,26 +41,28 @@ class FeddadaptationsplitOptimizer(BaseOptimizer, torch.optim.Optimizer):
                     self.state[param]['lam_g_dot_s_sum'] += lambda_k * torch.dot(
                         gk.view(-1), self.state[param]['sk'].view(-1))
 
-                    # calculate m_t
-                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk
-                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk
+                    self.state[param]['sk'].data.add_(gk, alpha=lambda_k)
+                    self.state[param]['zk'].data.sub_(gk, alpha=lambda_k)
 
-                    param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
+                    param.data.mul_(beta).add_(self.state[param]['zk'], alpha=1 - beta)
 
-                    # dkp1_ = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / (
-                    #         torch.norm(self.state[param]['sk'], p=2) + 1e-6)
-                    # print("self.state[param]['dk']", "self.state[param]['G']", "lambda_k", "dkp1_", "dkp1_actual")
-                    # print(self.state[param]['dk'], self.state[param]['G'], lambda_k, dkp1_, dkp1_actual)
+                    dkp1_prev = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / (
+                            torch.norm(self.state[param]['sk'], p=2) + 1e-6)
 
-                    dkp1_ = 2 * self.state[param]['lam_g_dot_s_sum'] / (torch.norm(self.state[param]['sk'], p=2) + 1e-6)
+                    dkp1_ = (2 * self.state[param]['lam_g_dot_s_sum'] / (torch.norm(self.state[param]['sk'], p=2) + 1e-6)).item()
 
-                    self.state[param]['dk'] = torch.max(self.state[param]['dk'], dkp1_)
+                    print("self.state[param]['dk']", "self.state[param]['G']", "lambda_k", "dkp1_prev", "dkp1")
+                    print(self.state[param]['dk'], self.state[param]['G'], lambda_k, dkp1_prev, dkp1_)
+
+                    self.state[param]['dk'] = max(self.state[param]['dk'], dkp1_)
                 elif idx == 1:  # idx == 1: buffers; just averaging
                     param.data.sub_(gk)
         return loss
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,
                    check_if=lambda name: 'num_batches_tracked' in name):
+        import pdb
+        pdb.set_trace()
         for group in self.param_groups:
             for server_param, (name, local_signals) in zip(group['params'], local_layers_iterator):
                 if check_if(name):

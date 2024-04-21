@@ -2,7 +2,7 @@ import torch
 
 from torch.optim import Optimizer
 
-class DAdaptation(Optimizer):
+class DAdaptationSplit(Optimizer):
     def __init__(self, params, **kwargs):
         # lr = kwargs.get('lr')
         # v0 = kwargs.get('v0')
@@ -29,7 +29,7 @@ class DAdaptation(Optimizer):
                 if idx == 0:  # idx == 0: parameters; optimize according to algorithm
                     opt_not_initialized = 'dk' not in self.state[param]
                     if opt_not_initialized:
-                        self.state[param]['dk'] = torch.tensor([10e-6])
+                        self.state[param]['dk'] = torch.tensor([1e-6]).item()
                         self.state[param]['sk'] = torch.zeros_like(gk).detach()
                         self.state[param]['zk'] = param.data.clone().detach()
                         self.state[param]['lam_g_dot_s_sum'] = 0
@@ -42,14 +42,14 @@ class DAdaptation(Optimizer):
                         gk.view(-1), self.state[param]['sk'].view(-1))
 
                     # calculate m_t
-                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk  # sk+1 = sk + lambda_k * gk
-                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk  # zk+1 = zk - lambda_k * gk
+                    self.state[param]['sk'].data.add_(gk, alpha=lambda_k)  # sk+1 = sk + lambda_k * gk
+                    self.state[param]['zk'].data.sub_(gk, alpha=lambda_k)
+
+                    param.data.mul_(beta).add_(self.state[param]['zk'], alpha=1 - beta)
 
 
-                    param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
-
-                    dkp1_ = 2 * (self.state[param]['lam_g_dot_s_sum']) / (torch.norm(self.state[param]['sk'], p=2) + 1e-6)
-                    self.state[param]['dk'] = torch.max(self.state[param]['dk'], dkp1_)
+                    dkp1_ = (2 * (self.state[param]['lam_g_dot_s_sum']) / (torch.norm(self.state[param]['sk'], p=2) + 1e-6)).item()
+                    self.state[param]['dk'] = max(self.state[param]['dk'], dkp1_)
                 elif idx == 1:  # idx == 1: buffers; just averaging
                     param.data.sub_(gk)
         return loss

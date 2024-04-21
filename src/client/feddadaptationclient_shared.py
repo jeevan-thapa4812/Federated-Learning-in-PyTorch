@@ -1,20 +1,19 @@
 import copy
-import inspect
 import itertools
 
 import torch
 
 from src import MetricManager
+from src.algorithm.dadapt_sgd import DAdaptSGD
 from src.algorithm.dadaptation import DAdaptation
 from src.algorithm.dadaptationsplit import DAdaptationSplit
-from src.algorithm.dadapt_sgd import DAdaptSGD
-from .baseclient import BaseClient
 from .fedavgclient import FedavgClient
 
 
 class FeddadaptationClient(FedavgClient):
     def __init__(self, **kwargs):
         super(FeddadaptationClient, self).__init__(**kwargs)
+
 
 def get_optimizer_class(name):
     if name == "DAdaptation":
@@ -26,12 +25,12 @@ def get_optimizer_class(name):
     else:
         return torch.optim.__dict__[name]
 
-class FeddadaptationClient(FedavgClient):
+
+class FeddadaptationClientShared(FedavgClient):
     def __init__(self, **kwargs):
-        super(FeddadaptationClient, self).__init__(**kwargs)
+        super(FeddadaptationClientShared, self).__init__(**kwargs)
 
     def update(self):
-        print("FeddadaptationClient update")
         mm = MetricManager(self.args.eval_metrics)
         self.model.train()
         self.model.to(self.args.device)
@@ -63,16 +62,40 @@ class FeddadaptationClient(FedavgClient):
             self.model.to('cpu')
         return mm.results
 
-    def download(self, model, optimizer_state):
-        # set optimizer state
+    def download(self, model, optimizer_state=None):
+        if optimizer_state is not None:
+
+            self.optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
+            named_optimizer_state = optimizer_state['named_optimizer_state']
+            optimizer_init_params = optimizer_state['optimizer_init_params']
+
+            for name, param in self.model.named_parameters():
+                self.optimizer.state[param] = named_optimizer_state[name]
+            group = self.optimizer.param_groups[0]
+            group['numerator_weighted'] = optimizer_init_params['numerator_weighted']
+            group['d'] = optimizer_init_params['d']
+            group['g0_norm'] = optimizer_init_params['g0_norm']
+            group['k'] = optimizer_init_params['k']
 
         self.model = copy.deepcopy(model)
 
     def upload(self):
         # extract optimizer state and upload
-        import pdb
-        pdb.set_trace()
-        self.optimizer.state
-        # extract optimizer state and upload
-        self.optimizer = None
-        return itertools.chain.from_iterable([self.model.named_parameters(), self.model.named_buffers()])
+        group = self.param_groups[0]
+
+        named_optimizer_state = {name: self.optimizer.state[param] for name, param in
+                                 self.model.named_parameters() }
+        optimizer_init_params = {
+            'numerator_weighted': group['numerator_weighted'],
+            'd': group['d'],
+            'g0_norm': group['g0_norm'],
+            'k': group['k']
+        }
+
+        optimizer_state = {
+            'named_optimizer_state': named_optimizer_state,
+            'optimizer_init_params': optimizer_init_params
+        }
+
+        del self.optimizer
+        return itertools.chain.from_iterable([self.model.named_parameters(), self.model.named_buffers()]), optimizer_state

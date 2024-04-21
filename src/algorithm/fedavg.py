@@ -35,7 +35,6 @@ class FedavgOptimizer(BaseOptimizer, torch.optim.Optimizer):
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,
                    check_if=lambda name: 'num_batches_tracked' in name):
-        # Accumulate local updates for a single local model
         for group in self.param_groups:
             for server_param, (name, local_signals) in zip(group['params'], local_layers_iterator):
                 if check_if(name):
