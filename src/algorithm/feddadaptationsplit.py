@@ -1,52 +1,27 @@
-import math
-
 import torch
 
 from .basealgorithm import BaseOptimizer
 
 
-class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
+class FeddadaptationsplitOptimizer(BaseOptimizer, torch.optim.Optimizer):
     def __init__(self, params, **kwargs):
         # lr = kwargs.get('lr')
         # v0 = kwargs.get('v0')
         # tau = kwargs.get('tau')
         # momentum = kwargs.get('betas')
-        defaults = dict(gamma_k=0.5, beta=0.9, weight_decay=0, numerator_weighted=0.0, dk=1e-6)
+        # defaults = dict(lr=lr, momentum=momentum, v0=v0, tau=tau)
+        defaults = {}
         BaseOptimizer.__init__(self);
         torch.optim.Optimizer.__init__(self, params=params, defaults=defaults)
 
     def step(self, closure=None):
-        group = self.param_groups[0]
-        decay = group['weight_decay']
-        numerator_weighted = group['numerator_weighted']
-        beta = group['beta']
-        dk = group['dk']
-
-        gamma_k = max(group['gamma_k'] for group in self.param_groups)
-
         loss = None
         if closure is not None:
             loss = closure()
 
-        if "G" not in self.state:
-            G_sq = 0
-            for idx, group in enumerate(self.param_groups):
-                for param in group['params']:
-                    if param.grad is None:
-                        continue
-                    gk = param.grad.data
-
-                    if decay != 0:
-                        gk.add(param.data, alpha=decay)
-
-                    G_sq += (gk ** 2).sum().item()
-            self.state['G'] = math.sqrt(G_sq)
-
-        lambda_k = dk * gamma_k / self.state['G']
-
-        sk_sq = 0
-
         for idx, group in enumerate(self.param_groups):
+            gamma_k = 1
+            beta = 0.9
             for param in group['params']:
                 if param.grad is None:
                     continue
@@ -54,28 +29,35 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
                 gk = param.grad.data
 
                 if idx == 0:  # idx == 0: parameters; optimize according to algorithm
-                    if 'sk' not in self.state[param]:
+                    opt_not_initialized = 'dk' not in self.state[param]
+                    if opt_not_initialized:
+                        self.state[param]['dk'] = torch.tensor([1e-6])
                         self.state[param]['sk'] = torch.zeros_like(gk).detach()
                         self.state[param]['zk'] = param.data.clone().detach()
+                        self.state[param]['G'] = torch.norm(gk, p=2)
+                        self.state[param]['lam_g_dot_s_sum'] = 0
+                        print('y')
+                    lambda_k = self.state[param]['dk'] * gamma_k / self.state[param]['G']
 
-                    if decay != 0:
-                        gk.add_(param.data, alpha=decay)
+                    self.state[param]['lam_g_dot_s_sum'] += lambda_k * torch.dot(
+                        gk.view(-1), self.state[param]['sk'].view(-1))
 
-                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk  # sk+1 = sk + lambda_k * gk
-                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk  # zk+1 = zk - lambda_k * gk
+                    # calculate m_t
+                    self.state[param]['sk'] = self.state[param]['sk'] + lambda_k * gk
+                    self.state[param]['zk'] = self.state[param]['zk'] - lambda_k * gk
 
                     param.data = beta * param.data + (1 - beta) * self.state[param]['zk']
 
-                    sk_sq += (self.state[param]['sk'] ** 2).sum().item()
-                    numerator_weighted += lambda_k * torch.dot(gk.view(-1), self.state[param]['sk'].view(-1))
+                    # dkp1_ = (self.state[param]['dk'] + self.state[param]['lam_g_dot_s_sum']) / (
+                    #         torch.norm(self.state[param]['sk'], p=2) + 1e-6)
+                    # print("self.state[param]['dk']", "self.state[param]['G']", "lambda_k", "dkp1_", "dkp1_actual")
+                    # print(self.state[param]['dk'], self.state[param]['G'], lambda_k, dkp1_, dkp1_actual)
 
+                    dkp1_ = 2 * self.state[param]['lam_g_dot_s_sum'] / (torch.norm(self.state[param]['sk'], p=2) + 1e-6)
+
+                    self.state[param]['dk'] = torch.max(self.state[param]['dk'], dkp1_)
                 elif idx == 1:  # idx == 1: buffers; just averaging
                     param.data.sub_(gk)
-
-        dkp1_hat = (2 * (dk + numerator_weighted) / math.sqrt(sk_sq + 1e-6)).item()
-        dk = max(dk, dkp1_hat)
-        self.param_groups[0]['dk'] = dk
-        self.param_groups[0]['numerator_weighted'] = numerator_weighted
         return loss
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,
