@@ -10,11 +10,6 @@ from src.algorithm.dadaptationsplit import DAdaptationSplit
 from .fedavgclient import FedavgClient
 
 
-class FeddadaptationClient(FedavgClient):
-    def __init__(self, **kwargs):
-        super(FeddadaptationClient, self).__init__(**kwargs)
-
-
 def get_optimizer_class(name):
     if name == "DAdaptation":
         return DAdaptation
@@ -39,7 +34,7 @@ class FeddadaptationClientShared(FedavgClient):
         #     optimizer = self.optimizer
         # else:
         #     optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
-        self.optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
+
 
         for e in range(self.args.E):
             for inputs, targets in self.train_loader:
@@ -63,28 +58,40 @@ class FeddadaptationClientShared(FedavgClient):
         return mm.results
 
     def download(self, model, optimizer_state=None):
-        if optimizer_state is not None:
+        self.model = copy.deepcopy(model)
 
-            self.optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
+        if optimizer_state is not None:
             named_optimizer_state = optimizer_state['named_optimizer_state']
             optimizer_init_params = optimizer_state['optimizer_init_params']
 
+            self.optimizer = self.optim(self.model.parameters(),
+                                        lr=self.args.lr,
+                                        momentum=self.args.momentum,
+                                        d0=optimizer_init_params['d'],
+                                        k=optimizer_init_params['k'],
+                                        numerator_weighted=optimizer_init_params['numerator_weighted']
+                                        )
+
             for name, param in self.model.named_parameters():
                 self.optimizer.state[param] = named_optimizer_state[name]
+
             group = self.optimizer.param_groups[0]
-            group['numerator_weighted'] = optimizer_init_params['numerator_weighted']
-            group['d'] = optimizer_init_params['d']
+            # group['numerator_weighted'] = optimizer_init_params['numerator_weighted']
+            # group['d'] = optimizer_init_params['d']
             group['g0_norm'] = optimizer_init_params['g0_norm']
+
             group['k'] = optimizer_init_params['k']
-
-        self.model = copy.deepcopy(model)
-
+            # print("Downloaded g0_norm: ", optimizer_init_params['g0_norm'])
+        else:
+            self.optimizer = self.optim(self.model.parameters(),
+                                        lr=self.args.lr,
+                                        momentum=self.args.momentum,)
     def upload(self):
         # extract optimizer state and upload
         group = self.optimizer.param_groups[0]
 
         named_optimizer_state = {name: self.optimizer.state[param] for name, param in
-                                 self.model.named_parameters() }
+                                 self.model.named_parameters()}
         optimizer_init_params = {
             'numerator_weighted': group['numerator_weighted'],
             'd': group['d'],
@@ -96,6 +103,8 @@ class FeddadaptationClientShared(FedavgClient):
             'named_optimizer_state': named_optimizer_state,
             'optimizer_init_params': optimizer_init_params
         }
+        # print("Uploaded g0_norm: ", optimizer_init_params['g0_norm'])
 
         del self.optimizer
-        return itertools.chain.from_iterable([self.model.named_parameters(), self.model.named_buffers()]), optimizer_state
+        return itertools.chain.from_iterable(
+            [self.model.named_parameters(), self.model.named_buffers()]), optimizer_state

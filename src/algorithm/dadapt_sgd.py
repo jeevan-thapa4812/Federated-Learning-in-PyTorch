@@ -27,10 +27,13 @@ class DAdaptSGD(torch.optim.Optimizer):
     """
 
     def __init__(self, params,
-                 lr=1.0,
-                 momentum=0.0,
+                 lr=0.5,
+                 momentum=0.9,
                  weight_decay=0,
-                 d0=1e-6, growth_rate=float('inf'),
+                 d0=1e-6,
+                 k=0,
+                 numerator_weighted=0.0,
+                 growth_rate=float('inf'),
                  ):
 
         if not 0.0 < d0:
@@ -38,15 +41,15 @@ class DAdaptSGD(torch.optim.Optimizer):
         if not 0.0 < lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
 
-        defaults = dict(lr=1.0,
-                        momentum=0.9,
-                        weight_decay=weight_decay, k=0,
-                        numerator_weighted=0.0,
+        defaults = dict(lr=lr,
+                        momentum=momentum,
+                        weight_decay=weight_decay,
+                        k=k,
+                        numerator_weighted=numerator_weighted,
                         d=d0,
                         growth_rate=growth_rate,
                         )
         self.loggables = {}
-
         try:
             self.rank = torch.distributed.get_rank()
         except:
@@ -73,8 +76,10 @@ class DAdaptSGD(torch.optim.Optimizer):
 
         group = self.param_groups[0]
 
-        sk_sq = 0.0
 
+        sk_sq = 0.0
+        # import pdb
+        # pdb.set_trace()
         if k == 0:
             g_sq = 0.0
             for group in self.param_groups:
@@ -88,11 +93,11 @@ class DAdaptSGD(torch.optim.Optimizer):
                     if decay != 0:
                         grad.add(p.data, alpha=decay)
 
-                    state = self.state[p]
+                    # state = self.state[p]
 
                     if group_lr > 0.0:
                         g_sq += (grad * grad).sum().item()
-
+            print("kkk" * 100, "G0 calculated.!")
             group['g0_norm'] = math.sqrt(g_sq)
 
         g0_norm = group['g0_norm']
@@ -110,8 +115,19 @@ class DAdaptSGD(torch.optim.Optimizer):
                     continue
                 grad = p.grad.data
                 state = self.state[p]
-
+                # print("Printing state")
+                # print(state)
+                # print(self.state)
+                # print(self.state)
+                # print(p.data)
+                # print(p.data.data_ptr)
+                # print(p.data_ptr)
+                # print(self.state.keys())
+                # print([k.data_ptr() for k in self.state.keys()])
+                # import pdb
+                # pdb.set_trace()
                 if 'z' not in state:
+                    print("Add z in state for parameter in optimizer")
                     z = state['z'] = torch.clone(p.data).detach()
                     s = state['s'] = torch.zeros_like(p.data).detach()
                     x0 = state['x0'] = torch.clone(p.data).detach()
@@ -129,11 +145,11 @@ class DAdaptSGD(torch.optim.Optimizer):
                     sk_sq += (s * s).sum().item()
             ######
 
-
         if lr > 0.0:
             global_numerator_weighted = numerator_weighted
-
             d_hat = 2 * global_numerator_weighted / math.sqrt(sk_sq)
+            assert not math.isnan(d_hat), "d_hat is NaN"
+            # print(f"dlr: {dlr:.5f}, d: {d:.5f}, d_hat: {d_hat:.5f}, lr: {lr:.5f}, |sk|: {math.sqrt(sk_sq):.5f}")
             d = max(d, min(d_hat, d * growth_rate))
 
         # if we have not done any updates

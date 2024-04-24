@@ -11,7 +11,7 @@ class FeddadaptationOptimizer(BaseOptimizer, torch.optim.Optimizer):
         # v0 = kwargs.get('v0')
         # tau = kwargs.get('tau')
         # momentum = kwargs.get('betas')
-        defaults = dict(gamma_k=0.5, beta=0.9, weight_decay=0, numerator_weighted=0.0, dk=1e-6)
+        defaults = dict(gamma_k=0.1, beta=0.9, weight_decay=0, numerator_weighted=0.0, dk=1e-6)
         BaseOptimizer.__init__(self);
         torch.optim.Optimizer.__init__(self, params=params, defaults=defaults)
 

@@ -217,12 +217,12 @@ class FedavgServer(BaseServer):
 
     def _request(self, ids, eval, participated, retain_model, save_raw):
         def __update_clients(client):
+            client.args.lr = self.curr_lr
             if isinstance(client, FeddadaptationClientShared):
                 client.download(self.global_model, self.client_optimizer_state)
             else:
                 if client.model is None:
                     client.download(self.global_model)
-            client.args.lr = self.curr_lr
             update_result = client.update()
             return {client.id: len(client.training_set)}, {client.id: update_result}
 
@@ -297,13 +297,12 @@ class FedavgServer(BaseServer):
                         updated_sizes.items()}
 
         # accumulate weights
+        self.client_optimizer_state = None
         for identifier in ids:
-            if isinstance(self.clients[identifier].model, FeddadaptationClientShared):
+            if isinstance(self.clients[identifier], FeddadaptationClientShared):
                 local_layers_iterator, client_optimizer_state = self.clients[identifier].upload()
                 self.server_optimizer.accumulate(coefficients[identifier], local_layers_iterator)
-
-                self.update_client_state(coefficients[identifier], client_optimizer_state)
-
+                self.update_client_optimizer_state(coefficients[identifier], client_optimizer_state)
                 self.clients[identifier].model = None
 
             else:
@@ -314,18 +313,21 @@ class FedavgServer(BaseServer):
             f'[{self.args.algorithm.upper()}] [{self.args.optimizer.upper()}] [{self.args.dataset.upper()}] [Round: {str(self.round).zfill(4)}] ...successfully aggregated into a new gloal model!')
 
     def update_client_optimizer_state(self, mixing_coefficient, client_optimizer_state):
+        # import pdb
+        # pdb.set_trace()
         named_optimizer_state = client_optimizer_state["named_optimizer_state"]
         optimizer_init_params = client_optimizer_state["optimizer_init_params"]
 
         if self.client_optimizer_state is None:
             self.client_optimizer_state = {
-                'named_optimizer_state': {name: param * mixing_coefficient for name, param in
+                'named_optimizer_state': {name: {k: v * mixing_coefficient for k, v in param.items()} for name, param in
                                           named_optimizer_state.items()},
                 'optimizer_init_params': {k: v * mixing_coefficient for k, v in optimizer_init_params.items()}
             }
         else:
             for name, param in named_optimizer_state.items():
-                self.client_optimizer_state['named_optimizer_state'][name] += param * mixing_coefficient
+                for k, v in param.items():
+                    self.client_optimizer_state['named_optimizer_state'][name][k] += v * mixing_coefficient
             for k, v in optimizer_init_params.items():
                 self.client_optimizer_state['optimizer_init_params'][k] += v * mixing_coefficient
 

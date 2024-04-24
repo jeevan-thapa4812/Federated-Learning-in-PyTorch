@@ -27,14 +27,14 @@ class FedavgOptimizer(BaseOptimizer, torch.optim.Optimizer):
                     if beta > 0.:
                         if 'momentum_buffer' not in self.state[param]:
                             self.state[param]['momentum_buffer'] = torch.zeros_like(param).detach()
-                        self.state[param]['momentum_buffer'].mul_(beta).add_(
-                            delta.mul(1. - beta))  # \beta * v + (1 - \beta) * grad
+                        self.state[param]['momentum_buffer'].mul_(beta).add_(delta.mul(1. - beta))
                         delta = self.state[param]['momentum_buffer']
                 param.data.sub_(delta)
         return loss
 
     def accumulate(self, mixing_coefficient, local_layers_iterator,
                    check_if=lambda name: 'num_batches_tracked' in name):
+        # Accumulate local updates for a single local model
         for group in self.param_groups:
             for server_param, (name, local_signals) in zip(group['params'], local_layers_iterator):
                 if check_if(name):

@@ -33,7 +33,7 @@ class FedavgClient(BaseClient):
 
         # import pdb
         # pdb.set_trace()
-        # self.use_single_optimizer_across_communication_rounds = True
+        self.use_single_optimizer_across_communication_rounds = True
         # if self.use_single_optimizer_across_communication_rounds:
         #     self.optimizer = self.optim(self.model.parameters(), **self._refine_optim_args(self.args))
 
@@ -112,6 +112,7 @@ class FedavgClient(BaseClient):
 
     def download(self, model):
         # if self.use_single_optimizer_across_communication_rounds and (self.model is not None):
+        #     pass
         self.model = copy.deepcopy(model)
 
     def upload(self):
