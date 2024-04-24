@@ -5,7 +5,7 @@ e=1 #5
 
 # FedAvg experiments in Table 1 of (McMahan et al., 2016)
 ## IID split
-for b in 0 10; do
+for b in 0; do
   python3 main.py \
     --exp_name "FedAvg_MNIST_2NN_IID_C${c}_B${b}" --seed 42 --device cuda \
     --dataset MNIST \
